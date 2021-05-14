@@ -34,11 +34,13 @@ cf_token=
 github_token=
 wowi_token=
 wago_token=
+singularity_token=
 
 # Variables set via command-line options
 slug=
 addonid=
 wagoid=
+singularityid=
 topdir=
 releasedir=
 overwrite=
@@ -51,8 +53,16 @@ skip_zipfile=
 skip_upload=
 skip_cf_upload=
 pkgmeta_file=
-game_version=
+game=
 game_type=
+game_version=
+game_version_id=
+toc_version=
+alpha=
+is_library=
+depends_on=
+optional_depends_on=
+eso_addon_version=
 file_type=
 file_name="{package-name}-{project-version}{nolib}{classic}"
 
@@ -134,28 +144,30 @@ toc_filter() {
 usage() {
 	cat <<-'EOF' >&2
 	Usage: release.sh [options]
-	  -c               Skip copying files into the package directory.
-	  -d               Skip uploading.
-	  -e               Skip checkout of external repositories.
-	  -l               Skip @localization@ keyword replacement.
-	  -L               Only do @localization@ keyword replacement (skip upload to CurseForge).
-	  -o               Keep existing package directory, overwriting its contents.
-	  -s               Create a stripped-down "nolib" package.
-	  -u               Use Unix line-endings.
-	  -z               Skip zip file creation.
-	  -t topdir        Set top-level directory of checkout.
-	  -r releasedir    Set directory containing the package directory. Defaults to "$topdir/.release".
-	  -p curse-id      Set the project id used on CurseForge for localization and uploading. (Use 0 to unset the TOC value)
-	  -w wowi-id       Set the addon id used on WoWInterface for uploading. (Use 0 to unset the TOC value)
-	  -a wago-id       Set the project id used on Wago Addons for uploading. (Use 0 to unset the TOC value)
-	  -g game-version  Set the game version to use for uploading.
-	  -m pkgmeta.yaml  Set the pkgmeta file to use.
-	  -n package-name  Set the package zip file name. Use "-n help" for more info.
+	  -c               	Skip copying files into the package directory.
+	  -d               	Skip uploading.
+	  -e               	Skip checkout of external repositories.
+	  -l               	Skip @localization@ keyword replacement.
+	  -L               	Only do @localization@ keyword replacement (skip upload to CurseForge).
+	  -o               	Keep existing package directory, overwriting its contents.
+	  -s               	Create a stripped-down "nolib" package.
+	  -u               	Use Unix line-endings.
+	  -z               	Skip zip file creation.
+	  -t topdir        	Set top-level directory of checkout.
+	  -r releasedir    	Set directory containing the package directory. Defaults to "$topdir/.release".
+	  -p curse-id      	Set the project id used on CurseForge for localization and uploading. (Use 0 to unset the TOC value)
+	  -w wowi-id       	Set the addon id used on WoWInterface for uploading. (Use 0 to unset the TOC value)
+	  -a wago-id       	Set the project id used on Wago Addons for uploading. (Use 0 to unset the TOC value)
+		-x singularity-id	Set the project id used on SingularityMods for uploading. (Use 0 to unset the TOC value)
+		-G game						Set the game to use for Singularity uploading.
+	  -g game-version  	Set the game version to use for uploading.
+	  -m pkgmeta.yaml  	Set the pkgmeta file to use.
+	  -n package-name  	Set the package zip file name. Use "-n help" for more info.
 	EOF
 }
 
 OPTIND=1
-while getopts ":celLzusop:dw:a:r:t:g:m:n:" opt; do
+while getopts ":celLzusop:dw:a:x:r:t:G:g:m:" opt; do
 	case $opt in
 		c) skip_copying="true" ;; # Skip copying files into the package directory
 		z) skip_zipfile="true" ;; # Skip creating a zip file
@@ -168,7 +180,11 @@ while getopts ":celLzusop:dw:a:r:t:g:m:n:" opt; do
 		p) slug="$OPTARG" ;; # Set CurseForge project id
 		w) addonid="$OPTARG" ;; # Set WoWInterface addon id
 		a) wagoid="$OPTARG" ;; # Set Wago Addons project id
-		r) releasedir="$OPTARG" ;; # Set the release directory
+		r) releasedir="$OPTARG" ;; # Set the release director
+		s) # Create a nolib package without externals
+			nolib="true"
+			skip_externals="true"
+			;;
 		t) # Set the top-level directory of the checkout
 			if [ ! -d "$OPTARG" ]; then
 				echo "Invalid argument for option \"-t\" - Directory \"$OPTARG\" does not exist." >&2
@@ -177,10 +193,9 @@ while getopts ":celLzusop:dw:a:r:t:g:m:n:" opt; do
 			fi
 			topdir="$OPTARG"
 			;;
-		s) # Create a nolib package without externals
-			nolib="true"
-			skip_externals="true"
-			;;
+		u) line_ending=unix ;; # Skip Unix-to-DOS line-ending translation.
+		z) skip_zipfile="true" ;; # Skip generating the zipfile.
+		G) game="$OPTARG" ;; # Set the Game id for Singularity
 		g) # Set the game type or version
 			OPTARG="${OPTARG,,}"
 			case "$OPTARG" in
@@ -215,7 +230,7 @@ while getopts ":celLzusop:dw:a:r:t:g:m:n:" opt; do
 					game_version="$OPTARG"
 			esac
 			;;
-		m) # Set the pkgmeta file
+		m) # Set the pkgmeta file.
 			if [ ! -f "$OPTARG" ]; then
 				echo "Invalid argument for option \"-m\" - File \"$OPTARG\" does not exist." >&2
 				usage
@@ -228,15 +243,11 @@ while getopts ":celLzusop:dw:a:r:t:g:m:n:" opt; do
 				cat <<-'EOF' >&2
 				Set the package zip file name. There are several string substitutions you can
 				use to include version control and build type infomation in the file name.
-
 				The default file name is "{package-name}-{project-version}{nolib}{classic}".
-
 				Tokens: {package-name}{project-revision}{project-hash}{project-abbreviated-hash}
 				        {project-author}{project-date-iso}{project-date-integer}{project-timestamp}
 				        {project-version}{game-type}{release-type}
-
 				Flags:  {alpha}{beta}{nolib}{classic}
-
 				Tokens are always replaced with their value. Flags are shown prefixed with a dash
 				depending on the build type.
 				EOF
@@ -355,6 +366,9 @@ fi
 [ -z "$github_token" ] && github_token=$GITHUB_OAUTH
 [ -z "$wowi_token" ] && wowi_token=$WOWI_API_TOKEN
 [ -z "$wago_token" ] && wago_token=$WAGO_API_TOKEN
+[ -z "$singularity_token" ] && singularity_token=$SINGULARITY_API_TOKEN
+[ -z "$game" ] && game=$GAME
+[ -z "$game" ] && game="wow"
 
 # Set $releasedir to the directory which will contain the generated addon zipfile.
 if [ -z "$releasedir" ]; then
@@ -810,6 +824,9 @@ if [ -f "$pkgmeta_file" ]; then
 			package-as)
 				package=$yaml_value
 				;;
+			game)
+				game=$yaml_value
+				;;
 			wowi-create-changelog)
 				if [ "$yaml_value" = "no" ]; then
 					wowi_gen_changelog=
@@ -931,24 +948,41 @@ elif [ "$repository_type" = "hg" ]; then
 	fi
 fi
 
+
 ###
-### Process TOC file
+### Process Manifest file
 ###
 
-# Set the package name from a TOC file name
+# Set the package name from a manifest file name
 if [[ -z "$package" ]]; then
-	package=$( cd "$topdir" && find *.toc -maxdepth 0 2>/dev/null | head -n1 )
+	if [[ "$game" == "wow" ]]; then
+		package=$( cd "$topdir" && find *.toc -maxdepth 0 2>/dev/null | head -n1 )
+	fi
+	if [[ "$game" == "eso" ]]; then
+		package=$( cd "$topdir" && find *.txt -maxdepth 0 2>/dev/null | head -n1 )
+	fi
 	if [[ -z "$package" ]]; then
-		echo "Could not find an addon TOC file. In another directory? Set 'package-as' in .pkgmeta" >&2
+		echo "Could not find an addon Manifest file. In another directory? Set 'package-as' in .pkgmeta" >&2
 		exit 1
 	fi
-	package=${package%.toc}
+	if [[ "$game" == "wow" ]]; then
+		package=${package%.toc}
+	fi
+	if [[ "$game" == "eso" ]]; then
+		package=${package%.txt}
+	fi
 	if [[ $package =~ ^(.*)-(Mainline|Classic|BCC)$ ]]; then
 		package="${BASH_REMATCH[1]}"
 	fi
 fi
 
-toc_path="$package.toc"
+if [[ "$game" == "wow" ]]; then
+	toc_path="$package.toc"
+fi
+if [[ "$game" == "eso" ]]; then
+	toc_path="$package.txt"
+fi
+
 
 # Handle having the main addon in a sub dir
 if [[ ! -f "$topdir/$toc_path" && -f "$topdir/$package/$toc_path" ]]; then
@@ -956,7 +990,7 @@ if [[ ! -f "$topdir/$toc_path" && -f "$topdir/$package/$toc_path" ]]; then
 fi
 
 if [[ ! -f "$topdir/$toc_path" ]]; then
-	echo "Could not find an addon TOC file. In another directory? Make sure it matches the 'package-as' in .pkgmeta" >&2
+	echo "Could not find an addon Manifest file. In another directory? Make sure it matches the 'package-as' in .pkgmeta" >&2
 	exit 1
 fi
 
@@ -966,57 +1000,74 @@ toc_file=$(
 	[ "$file_type" != "alpha" ] && _tf_alpha="true"
 	sed -e $'1s/^\xEF\xBB\xBF//' -e $'s/\r//g' "$topdir/$toc_path" | toc_filter alpha ${_tf_alpha} | toc_filter debug true
 )
-root_toc_version=$( awk '/^## Interface:/ { print $NF; exit }' <<< "$toc_file" )
+if [[ "$game" == "eso" ]]; then
+	root_toc_version=$( awk '/^## APIVersion:/ { print $0; exit }' <<< "$toc_file"  | sed -e 's/|c[0-9A-Fa-f]\{8\}//g' -e 's/|r//g' -e 's/|T[^|]*|t//g' -e 's/## APIVersion[[:space:]]*:[[:space:]]*\(.*\)/\1/' -e 's/[[:space:]]*$//' )
+fi
+if [[ "$game" == "wow" ]]; then
+	root_toc_version=$( awk '/^## Interface:/ { print $NF; exit }' <<< "$toc_file" )
+fi
 toc_version="$root_toc_version"
-if [[ -n "$toc_version" && -z "$game_type" ]]; then
-	# toc -> game type
-	case $toc_version in
-		113*) game_type="classic" ;;
-		205*) game_type="bc" ;;
-		*) game_type="retail"
-	esac
-else
-	# game type -> toc
-	game_type_toc_version=$( awk 'tolower($0) ~ /^## interface-'${game_type:-retail}':/ { print $NF; exit }' <<< "$toc_file" )
-	if [[ -z "$game_type" ]]; then
-		# default to retail
-		game_type="retail"
-	elif [[ -n "$game_type_toc_version" ]]; then
-		# use the game version value if set
-		toc_version="$game_type_toc_version"
-	fi
-	# Check for other interface lines
-	if [[ -z "$toc_version" ]] || \
-		 [[ "$game_type" == "classic" && "$toc_version" != "113"* ]] || \
-		 [[ "$game_type" == "bc" && "$toc_version" != "205"* ]] || \
-		 [[ "$game_type" == "retail" && ("$toc_version" == "113"* || "$toc_version" == "205"*) ]]
-	then
-		toc_version="$game_type_toc_version"
+
+if [[ "$game" == "wow" ]]; then
+	if [[ -n "$toc_version" && -z "$game_type" ]]; then
+		# toc -> game type
+		case $toc_version in
+			113*) game_type="classic" ;;
+			205*) game_type="bc" ;;
+			*) game_type="retail"
+		esac
+	else
+		# game type -> toc
+		game_type_toc_version=$( awk 'tolower($0) ~ /^## interface-'${game_type:-retail}':/ { print $NF; exit }' <<< "$toc_file" )
+		if [[ -z "$game_type" ]]; then
+			# default to retail
+			game_type="retail"
+		elif [[ -n "$game_type_toc_version" ]]; then
+			# use the game version value if set
+			toc_version="$game_type_toc_version"
+		fi
+		# Check for other interface lines
+		if [[ -z "$toc_version" ]] || \
+			[[ "$game_type" == "classic" && "$toc_version" != "113"* ]] || \
+			[[ "$game_type" == "bc" && "$toc_version" != "205"* ]] || \
+			[[ "$game_type" == "retail" && ("$toc_version" == "113"* || "$toc_version" == "205"*) ]]
+		then
+			toc_version="$game_type_toc_version"
+			if [[ -z "$toc_version" ]]; then
+				# Check @non-@ blocks
+				case $game_type in
+					classic) toc_version=$( sed -n '/@non-[-a-z]*@/,/@end-non-[-a-z]*@/{//b;p}' <<< "$toc_file" | awk '/#[[:blank:]]*## Interface:[[:blank:]]*(113)/ { print $NF; exit }' ) ;;
+					bc) toc_version=$( sed -n '/@non-[-a-z]*@/,/@end-non-[-a-z]*@/{//b;p}' <<< "$toc_file" | awk '/#[[:blank:]]*## Interface:[[:blank:]]*(205)/ { print $NF; exit }' ) ;;
+				esac
+				# This becomes the actual interface version after string replacements
+				root_toc_version="$toc_version"
+			fi
+		fi
 		if [[ -z "$toc_version" ]]; then
-			# Check @non-@ blocks
-			case $game_type in
-				classic) toc_version=$( sed -n '/@non-[-a-z]*@/,/@end-non-[-a-z]*@/{//b;p}' <<< "$toc_file" | awk '/#[[:blank:]]*## Interface:[[:blank:]]*(113)/ { print $NF; exit }' ) ;;
-				bc) toc_version=$( sed -n '/@non-[-a-z]*@/,/@end-non-[-a-z]*@/{//b;p}' <<< "$toc_file" | awk '/#[[:blank:]]*## Interface:[[:blank:]]*(205)/ { print $NF; exit }' ) ;;
-			esac
-			# This becomes the actual interface version after string replacements
-			root_toc_version="$toc_version"
+			echo "Addon TOC interface version is not compatible with the game version \"${game_type}\" or was not found." >&2
+			exit 1
+		fi
+		if [[ "${toc_version,,}" == "incompatible" ]]; then
+			echo "Addon TOC interface version is set as incompatible for game version \"${game_type}\"." >&2
+			exit 1
 		fi
 	fi
-	if [[ -z "$toc_version" ]]; then
-		echo "Addon TOC interface version is not compatible with the game version \"${game_type}\" or was not found." >&2
-		exit 1
-	fi
-	if [[ "${toc_version,,}" == "incompatible" ]]; then
-		echo "Addon TOC interface version is set as incompatible for game version \"${game_type}\"." >&2
-		exit 1
+	if [ -z "$game_version" ]; then
+		printf -v game_version "%d.%d.%d" ${toc_version:0:1} ${toc_version:1:2} ${toc_version:3:2} 2>/dev/null || {
+			echo "Addon TOC interface version \"${toc_version}\" is invalid." >&2
+			exit 1
+		}
+		game_versions[$game_type]="$game_version"
 	fi
 fi
-if [ -z "$game_version" ]; then
-	printf -v game_version "%d.%d.%d" ${toc_version:0:1} ${toc_version:1:2} ${toc_version:3:2} 2>/dev/null || {
-		echo "Addon TOC interface version \"${toc_version}\" is invalid." >&2
-		exit 1
-	}
-	game_versions[$game_type]="$game_version"
+
+# If ESO, grab other important information
+if [[ "$game" == "eso" ]]; then
+	game_type="retail"
+	is_library==$( echo "$toc_file" | awk '/^## IsLibrary:/ { print $NF; exit }' )
+	depends_on=$( echo "$toc_file" | awk '/^## DependsOn:/ { print $NF; exit }' )
+	optional_depends_on=$( echo "$toc_file" | awk '/^## OptionalDependsOn:/ { print $NF; exit }' )
+	eso_addon_version=$( echo "$toc_file" | awk '/^## AddOnVersion:/ { print $NF; exit }' )
 fi
 
 # Get the title of the project for using in the changelog.
@@ -1033,12 +1084,16 @@ fi
 if [ -z "$wagoid" ]; then
 	wagoid=$( awk '/^## X-Wago-ID:/ { print $NF; exit }' <<< "$toc_file" )
 fi
+if [ -z "$singularityid" ]; then
+	singularityid=$( echo "$toc_file" | awk '/^## X-Singularity-ID:/ { print $NF; exit }' )
+fi
 unset toc_file
 
 # unset project ids if they are set to 0
 [ "$slug" = "0" ] && slug=
 [ "$addonid" = "0" ] && addonid=
 [ "$wagoid" = "0" ] && wagoid=
+[ "$singularityid" = "0" ] && singularityid=
 
 # Automatic file type detection based on CurseForge rules
 # 1) Untagged commits will be marked as an alpha.
@@ -1081,6 +1136,9 @@ if [ -n "$addonid" ]; then
 fi
 if [ -n "$wagoid" ]; then
 	echo "Wago ID: $wagoid${wago_token:+ [token set]}"
+fi
+if [ -n "$singularityid" ]; then
+	echo "Singularity ID: $singularityid${singularity_token:+ [token set]}"
 fi
 if [ -n "$project_github_slug" ]; then
 	echo "GitHub: $project_github_slug${github_token:+ [token set]}"
@@ -2228,15 +2286,17 @@ if [ -z "$skip_zipfile" ]; then
 	upload_curseforge=$( [[ -z "$skip_upload" && -z "$skip_cf_upload" && -n "$slug" && -n "$cf_token" && -n "$project_site" ]] && echo true )
 	upload_wowinterface=$( [[ -z "$skip_upload" && -n "$tag" && -n "$addonid" && -n "$wowi_token" ]] && echo true )
 	upload_wago=$( [[ -z "$skip_upload" && -n "$wagoid" && -n "$wago_token" ]] && echo true )
+	upload_singularity=$( [[ -z "$skip_upload" && -n "$singularityid" && -n "$singularity_token" ]] && echo true )
 	upload_github=$( [[ -z "$skip_upload" && -n "$tag" && -n "$project_github_slug" && -n "$github_token" ]] && echo true )
 
-	if [[ -n "$upload_curseforge" || -n "$upload_wowinterface" || -n "$upload_github" || -n "$upload_wago" ]] && ! hash jq &>/dev/null; then
+	if [[ -n "$upload_curseforge" || -n "$upload_wowinterface" || -n "$upload_github" || -n "$upload_wago" || -n "$upload_singularity" ]] && ! hash jq &>/dev/null; then
 		echo "Skipping upload because \"jq\" was not found."
 		echo
 		upload_curseforge=
 		upload_wowinterface=
 		upload_wago=
 		upload_github=
+		upload_singularity=
 		exit_code=1
 	fi
 
@@ -2448,6 +2508,99 @@ if [ -z "$skip_zipfile" ]; then
 				-F "file=@$archive" \
 				"https://addons.wago.io/api/projects/$wagoid/version"
 		) && {
+			case $result in
+				200|201) echo "Success!" ;;
+				302)
+					echo "Error! ($result)"
+					# don't need to ouput the redirect page
+					exit_code=1
+					;;
+				404)
+					echo "Error! No Wago project for id \"$wagoid\" found."
+					exit_code=1
+					;;
+				*)
+					echo "Error! ($result)"
+					if [ -s "$resultfile" ]; then
+						echo "$(<"$resultfile")"
+					fi
+					exit_code=1
+					;;
+			esac
+		} || {
+			exit_code=1
+		}
+		echo
+
+		rm -f "$resultfile" 2>/dev/null
+	fi
+
+		# Upload to Singularity
+	if [ -n "$upload_singularity" ]; then
+		_singularity_game_id=1
+		_singularity_game_version_flavor="wow_retail"
+		if [ "$game" = "wow" ]; then
+			if [ "$game_type" = "classic" ]; then
+				_singularity_game_version_flavor="wow_classic"
+			fi
+			if [ "$game_type" = "bc" ]; then
+				_singularity_game_version_flavor="wow_burning_crusade"
+			fi
+		fi
+		if [ "$game" = "eso" ]; then
+			_singularity_game_id=2
+			_singularity_game_version_flavor="eso"
+		fi
+		if [ -z "$game_version" ]; then
+			read -ra _api_versions <<< "$toc_version"	
+			echo ${_api_versions[*]}
+			echo ${#_api_versions[*]}
+			_api_version_string=
+			if [ ${#_api_versions[*]} -gt 0 ]; then
+				_api_version_string=${_api_versions[0]}
+				if [ ${#_api_versions[*]} -gt 1 ]; then
+					_api_version_string+="+"
+					_api_version_string+=${_api_versions[1]}
+				fi
+			fi
+			echo "$_api_version_string"
+			_singularity_version_resp=$( curl -s -H "x-api-token: $singularity_token" https://api.singularitymods.com/api/v2/game/$_singularity_game_id/patches/interface/$_api_version_string)
+			if [ -n "$_singularity_version_resp" ]; then
+				_singularity_game_version=$( echo "$_singularity_version_resp" | jq -r .versions 2>/dev/null )
+			else
+				_singularity_game_version = "[]"
+			fi
+		else
+			_singularity_game_version="[\"$game_version\"]"
+		fi
+	fi
+
+	if [ -n "$upload_singularity" ] ; then
+		_singularity_channel=$file_type
+		_singularity_payload=$( cat <<-EOF
+		{
+			"displayName": "$project_version",
+			"gameId": "$_singularity_game_id",
+			"gameVersion": $_singularity_game_version,
+			"version": "$project_version",
+		  "gameVersionFlavor": "$_singularity_game_version_flavor",
+		  "channel": "$_singularity_channel",
+		  "changelog": $( jq --slurp --raw-input '.' < "$pkgdir/$changelog" ),
+			"changelogType": "$changelog_markup"
+		}
+		EOF
+		)
+
+		echo "Uploading $archive_name ($game_version $file_type) to Singularity"
+		resultfile="$releasedir/singularity_result.json"
+		result=$( echo "$_singularity_payload" | curl -sS --retry 3 --retry-delay 10 \
+				-w "%{http_code}" -o "$resultfile" \
+				-H "x-api-key: $singularity_token" \
+				-H "accept: application/json" \
+				-F "metadata=<-" \
+				-F "file=@$archive" \
+				"https://api.singularitymods.com/api/v2/project/$singularityid/publish" ) &&
+		{
 			case $result in
 				200|201) echo "Success!" ;;
 				302)

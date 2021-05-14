@@ -1,4 +1,6 @@
-# release.sh
+# Singularity Packager
+
+The Singularity packager allows you to package and upload an addon zip archive to multiple addon distribution platforms. The packager is built on the great work by the BigWigsMods and updated to include support for Elder Scrolls Online addon releases.
 
 __release.sh__ generates an addon zip file from a Git, SVN, or Mercurial
 checkout.
@@ -25,6 +27,7 @@ id (`-w`) or the Wago project id (`-a`) by adding the following to the TOC file:
     ## X-Curse-Project-ID: 1234
     ## X-WoWI-ID: 5678
     ## X-Wago-ID: he54k6bL
+    ## X-Singularity-ID: AABBCCDDEE
 
 Your CurseForge project id can be found on the addon page in the "About Project"
 side box.
@@ -33,6 +36,8 @@ Your WoWInterface addon id is in the url for the addon, eg, the "5678"
 in <https://wowinterface.com/downloads/info5678-MyAddon>.
 
 Your Wago project id can be found on the developer dashboard.
+
+Your Singularity project id can be found in the addon project management platform.
 
 ### The PackageMeta file
 
@@ -240,23 +245,25 @@ The recommended way to include __release.sh__ in a project is to:
 ## Usage
 
     Usage: release.sh [options]
-      -c               Skip copying files into the package directory.
-      -d               Skip uploading.
-      -e               Skip checkout of external repositories.
-      -l               Skip @localization@ keyword replacement.
-      -L               Only do @localization@ keyword replacement (skip upload to CurseForge).
-      -o               Keep existing package directory, overwriting its contents.
-      -s               Create a stripped-down "nolib" package.
-      -u               Use Unix line-endings.
-      -z               Skip zip file creation.
-      -t topdir        Set top-level directory of checkout.
-      -r releasedir    Set directory containing the package directory. Defaults to "$topdir/.release".
-      -p curse-id      Set the project id used on CurseForge for localization and uploading. (Use 0 to unset the TOC value)
-      -w wowi-id       Set the addon id used on WoWInterface for uploading. (Use 0 to unset the TOC value)
-      -a wago-id       Set the project id used on Wago Addons for uploading. (Use 0 to unset the TOC value)
-      -g game-version  Set the game version to use for uploading.
-      -m pkgmeta.yaml  Set the pkgmeta file to use.
-      -n package-name  Set the package zip file name. Use "-n help" for more info.
+      -c                Skip copying files into the package directory.
+      -d                Skip uploading.
+      -e                Skip checkout of external repositories.
+      -l                Skip @localization@ keyword replacement.
+      -L                Only do @localization@ keyword replacement (skip upload to CurseForge).
+      -o                Keep existing package directory, overwriting its contents.
+      -s                Create a stripped-down "nolib" package.
+      -u                Use Unix line-endings.
+      -z                Skip zip file creation.
+      -t topdir         Set top-level directory of checkout.
+      -r releasedir     Set directory containing the package directory. Defaults to "$topdir/.release".
+      -p curse-id       Set the project id used on CurseForge for localization and uploading. (Use 0 to unset the TOC value)
+      -w wowi-id        Set the addon id used on WoWInterface for uploading. (Use 0 to unset the TOC value)
+      -a wago-id        Set the project id used on Wago Addons for uploading. (Use 0 to unset the TOC value)
+      -x singularity-id Set the project id used on SingularityMods for uploading. (Use 0 to unset the TOC value)
+      -G game           Set the game to use for Singularity uploading.
+      -g game-version   Set the game version to use for uploading.
+      -m pkgmeta.yaml   Set the pkgmeta file to use.
+      -n package-name   Set the package zip file name. Use "-n help" for more info.
 
 ### Uploading
 
@@ -267,6 +274,8 @@ __release.sh__ uses following environment variables for uploading:
 - `WOWI_API_TOKEN` - a [WoWInterface API token](https://www.wowinterface.com/downloads/filecpl.php?action=apitokens),
   required for uploading to WoWInterface.
 - `WAGO_API_TOKEN` - a [Wago Addons API token](https://addons.wago.io/account/apikeys),
+  required for uploading to Wago Addons.
+- `SINGULARITY_API_TOKEN` - a [Singularity API token](https://help.singularitymods.com/docs/manage-project/upload-file/api-upload#get-your-api-key),
   required for uploading to Wago Addons.
 - `GITHUB_OAUTH` - a [GitHub personal access token](https://github.com/settings/tokens),
   required for uploading to GitHub.
